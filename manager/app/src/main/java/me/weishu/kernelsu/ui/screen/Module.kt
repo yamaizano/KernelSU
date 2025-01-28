@@ -772,6 +772,7 @@ fun ModuleItem(
                     .padding(end = 4.dp)
             ) {
                 val moduleVersion = stringResource(id = R.string.module_version)
+                val moduleId = stringResource(id = R.string.module_id)
                 val moduleAuthor = stringResource(id = R.string.module_author)
 
                 Text(
@@ -789,6 +790,14 @@ fun ModuleItem(
                     fontWeight = FontWeight.Medium,
                     color = colorScheme.onSurfaceVariantSummary,
                     textDecoration = textDecoration,
+                )
+
+                Text(
+                    text = "$moduleId: ${module.id}",
+                    fontSize = MaterialTheme.typography.bodySmall.fontSize,
+                    lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+                    fontFamily = MaterialTheme.typography.bodySmall.fontFamily,
+                    textDecoration = textDecoration
                 )
 
                 Text(
