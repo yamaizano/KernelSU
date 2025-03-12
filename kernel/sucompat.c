@@ -4,15 +4,14 @@
 #include <linux/cred.h>
 #include <linux/err.h>
 #include <linux/fs.h>
-#include <linux/kprobes.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/sched/task_stack.h>
+#include <linux/ptrace.h>
 
 #include "objsec.h"
 #include "allowlist.h"
-#include "arch.h"
 #include "klog.h" // IWYU pragma: keep
 #include "ksud.h"
 #include "kernel_compat.h"
@@ -164,88 +163,36 @@ int ksu_handle_execve_sucompat(int *fd, const char __user **filename_user,
 	return 0;
 }
 
-#ifdef CONFIG_KPROBES
-
-static int faccessat_handler_pre(struct kprobe *p, struct pt_regs *regs)
+int ksu_handle_devpts(struct inode *inode)
 {
-	struct pt_regs *real_regs = PT_REAL_REGS(regs);
-	int *dfd = (int *)&PT_REGS_PARM1(real_regs);
-	const char __user **filename_user =
-		(const char **)&PT_REGS_PARM2(real_regs);
-	int *mode = (int *)&PT_REGS_PARM3(real_regs);
-
-	return ksu_handle_faccessat(dfd, filename_user, mode, NULL);
-}
-
-static int newfstatat_handler_pre(struct kprobe *p, struct pt_regs *regs)
-{
-	struct pt_regs *real_regs = PT_REAL_REGS(regs);
-	int *dfd = (int *)&PT_REGS_PARM1(real_regs);
-	const char __user **filename_user =
-		(const char **)&PT_REGS_PARM2(real_regs);
-	int *flags = (int *)&PT_REGS_SYSCALL_PARM4(real_regs);
-
-	return ksu_handle_stat(dfd, filename_user, flags);
-}
-
-static int execve_handler_pre(struct kprobe *p, struct pt_regs *regs)
-{
-	struct pt_regs *real_regs = PT_REAL_REGS(regs);
-	const char __user **filename_user =
-		(const char **)&PT_REGS_PARM1(real_regs);
-
-	return ksu_handle_execve_sucompat(AT_FDCWD, filename_user, NULL, NULL,
-					  NULL);
-}
-
-static struct kprobe *init_kprobe(const char *name,
-				  kprobe_pre_handler_t handler)
-{
-	struct kprobe *kp = kzalloc(sizeof(struct kprobe), GFP_KERNEL);
-	if (!kp)
-		return NULL;
-	kp->symbol_name = name;
-	kp->pre_handler = handler;
-
-	int ret = register_kprobe(kp);
-	pr_info("sucompat: register_%s kprobe: %d\n", name, ret);
-	if (ret) {
-		kfree(kp);
-		return NULL;
+	if (!current->mm) {
+		return 0;
 	}
 
-	return kp;
-}
+	uid_t uid = current_uid().val;
+	if (uid % 100000 < 10000) {
+		// not untrusted_app, ignore it
+		return 0;
+	}
 
-static void destroy_kprobe(struct kprobe **kp_ptr)
-{
-	struct kprobe *kp = *kp_ptr;
-	if (!kp)
-		return;
-	unregister_kprobe(kp);
-	synchronize_rcu();
-	kfree(kp);
-	*kp_ptr = NULL;
-}
+	if (!ksu_is_allow_uid(uid))
+		return 0;
 
-static struct kprobe *su_kps[3];
-#endif
+	if (ksu_devpts_sid) {
+		struct inode_security_struct *sec = selinux_inode(inode);
+		if (sec) {
+			sec->sid = ksu_devpts_sid;
+		}
+	}
+
+	return 0;
+}
 
 // sucompat: permited process can execute 'su' to gain root access.
 void ksu_sucompat_init()
 {
-#ifdef CONFIG_KPROBES
-	su_kps[0] = init_kprobe(SYS_EXECVE_SYMBOL, execve_handler_pre);
-	su_kps[1] = init_kprobe(SYS_FACCESSAT_SYMBOL, faccessat_handler_pre);
-	su_kps[2] = init_kprobe(SYS_NEWFSTATAT_SYMBOL, newfstatat_handler_pre);
-#endif
 }
 
 void ksu_sucompat_exit()
 {
-#ifdef CONFIG_KPROBES
-	for (int i = 0; i < ARRAY_SIZE(su_kps); i++) {
-		destroy_kprobe(&su_kps[i]);
-	}
-#endif
 }
