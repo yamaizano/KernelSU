@@ -7,13 +7,14 @@
 #include "linux/key.h"
 
 #if defined(CONFIG_ARM) || defined(CONFIG_ARM64)
-#define DONT_GET_SMART() \
-    do {                 \
-        barrier();       \
-        dmb(sy);         \
-        dsb(sy);         \
-        isb();           \
-    } while (0)
+#ifndef spec_bar
+__weak void spec_bar()
+{
+    dsb(nsh);
+    isb();
+}
+#endif // spec_bar()
+#define DONT_GET_SMART() spec_bar()
 #else
 // well, compiler atleast, and not our targets
 #define DONT_GET_SMART() barrier()
